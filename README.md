@@ -1,10 +1,12 @@
 # LLM Security Monitoring Proxy
 
-**A SOC-style detection layer for LLM applications.** The proxy sits between users and an
-LLM chatbot, logs every prompt, response and tool call, and raises alerts for prompt
-injection, system-prompt leakage, tool abuse and indirect prompt injection.
+**A SOC-style detection and compliance-evidence layer for LLM applications.** The proxy sits
+between users and an LLM chatbot, logs every prompt, response and tool call in a
+**tamper-evident audit log**, raises alerts for prompt injection, system-prompt leakage, tool
+abuse and indirect prompt injection, maps every detection to **OWASP LLM Top 10, MITRE ATLAS,
+the EU AI Act and BSI guidance**, and generates a **printable security assessment report**.
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-proxy-green) ![OWASP LLM Top 10](https://img.shields.io/badge/OWASP-LLM%20Top%2010-red) ![tests](https://img.shields.io/badge/tests-15%20passing-brightgreen)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-proxy-green) ![OWASP LLM Top 10](https://img.shields.io/badge/OWASP-LLM%20Top%2010-red) ![tests](https://img.shields.io/badge/tests-18%20passing-brightgreen) ![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Art.%2012%20%7C%2015-blue)
 
 ---
 
@@ -15,6 +17,26 @@ databases). Attackers don't need exploits: a well-crafted sentence can make the 
 its instructions, misuse a tool, or follow instructions hidden in a document it reads.
 Most applications have no visibility into this. This project applies classic SOC
 principles (logging, layered detection, alerting, runbooks) to that new attack surface.
+
+## Security + compliance in one tool
+
+Most prompt-injection tools answer one question: *block or allow?* This project also produces
+the **evidence** that security and compliance teams need:
+
+| Capability | What it gives you | Framework link |
+|---|---|---|
+| **Tamper-evident audit log** | Every request, alert and tool action is sealed in a SHA-256 hash chain. Editing, deleting or reordering any record is detected and pinpointed. | EU AI Act Art. 12 (record-keeping) |
+| **Framework mapping** | Each alert carries its OWASP LLM Top 10 (2025), MITRE ATLAS technique, EU AI Act article and BSI reference. | OWASP, MITRE ATLAS, EU AI Act, BSI |
+| **Assessment report** | One click → executive summary, overall risk, findings, exfiltration evidence, control matrix with honest Implemented / Partial / Gap status, integrity proof, recommendations. Print to PDF. | EU AI Act Art. 9, 14, 15 |
+| **Exfiltration evidence** | Emails the AI was tricked into sending are saved as real `.eml` files. | OWASP LLM02 / LLM06 |
+
+```bash
+python scripts/verify_audit.py    # INTACT / TAMPERING DETECTED (exit code 0 / 1)
+python scripts/tamper_demo.py     # play an insider who downgrades a HIGH alert, and watch it get caught
+```
+
+> Scope note: the EU AI Act's Art. 9-15 obligations apply to *high-risk* AI systems. A shop
+> chatbot usually isn't one; the Act is used here as a reference control framework.
 
 ## Architecture
 
@@ -109,6 +131,9 @@ curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" \
 - **Filters:** time range (15 min / 1 h / 24 h / all), severity, detector, source IP, free-text search
 - **Outbox**: every email the AI tried to send (recipient, subject, body), marked SENT or BLOCKED, with external recipients flagged. Click to read the full email
 - **Alert feed** with severity badges; click a row to **investigate**: full prompt, model response, tool calls and the proxy's decision
+- **Audit-log status** in the header (green = verified, red = tampered; click for details)
+- **📄 Audit report** button: generates the assessment report for the selected time range
+- **Framework mapping** (OWASP / MITRE ATLAS / EU AI Act / BSI) on every alert in the investigation view
 - **Test console** to send messages through the proxy from the browser
 
 All attacker-controlled text is rendered with `textContent`, so a malicious prompt cannot execute in the analyst's browser (stored-XSS protection).
@@ -129,7 +154,9 @@ app/
   static/dashboard.html SOC dashboard (no external dependencies)
   llm_client.py        mock (deliberately vulnerable) and OpenAI clients
   tools.py             tools, honey tools, tool-call monitor
-  storage.py           SQLite logging + JSONL alert export
+  storage.py           SQLite logging, JSONL alert export, tamper-evident audit chain
+  compliance.py        rule -> OWASP / MITRE ATLAS / EU AI Act / BSI mapping + control matrix
+  report.py            printable security assessment report
   config.py            canary, honey tools, allowlist
   detectors/
     rules.py           direct injection rules
@@ -138,6 +165,8 @@ app/
   data/reviews.json    product reviews (one poisoned)
 attacks/prompts.json   attack and benign test prompts
 scripts/run_attacks.py evaluation script
+scripts/verify_audit.py audit-log integrity check
+scripts/tamper_demo.py tampering demonstration
 tests/                 unit tests
 ```
 
@@ -169,6 +198,8 @@ detector=* severity=HIGH | stats count by src_ip | sort -count     (top attackin
 - **OWASP Top 10 for LLM Applications (2025):** LLM01 Prompt Injection (direct + indirect), LLM02 Sensitive Information Disclosure, LLM06 Excessive Agency, LLM07 System Prompt Leakage
 - **MITRE ATLAS:** LLM Prompt Injection, LLM Jailbreak, exfiltration via LLM tool use
 - **MITRE D3FEND:** Decoy Object, Decoy User Credential (honey tools / honeytokens)
+- **EU AI Act (Regulation (EU) 2024/1689):** Art. 9 risk management, Art. 12 record-keeping, Art. 14 human oversight, Art. 15 accuracy, robustness and cybersecurity
+- **BSI:** *Generative AI Models: Opportunities and Risks for Industry and Authorities*; *Indirect Prompt Injections*
 
 ## Limitations
 
@@ -181,7 +212,9 @@ detector=* severity=HIGH | stats count by src_ip | sort -count     (top attackin
 - [ ] Evaluation against a production LLM
 - [x] Source IP / client attribution on every alert
 - [ ] Session-level risk scoring for multi-turn attacks
-- [ ] Automatic incident report per HIGH alert
+- [x] Assessment report with framework mapping and control matrix
+- [x] Tamper-evident (hash-chained) audit log
+- [ ] External anchoring of the audit hash + 6-month retention policy
 - [ ] Tools served through a real MCP server
 - [ ] Splunk dashboard and Sigma rules, attack suite in GitHub Actions
 

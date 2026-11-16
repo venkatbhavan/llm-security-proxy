@@ -40,6 +40,12 @@
           border: 1px solid var(--border); background: var(--surface-1); font-size: 12.5px;
           color: var(--text-secondary); }
   .pill strong { color: var(--text-primary); font-weight: 650; }
+  a.btn { text-decoration: none; display: inline-block; }
+  button.pill { cursor: pointer; font: inherit; }
+  #auditPill.ok { border-color: rgba(12,163,12,.55); color: #5fd35f; }
+  #auditPill.bad { border-color: rgba(208,59,59,.7); color: #ff8a8a; background: rgba(208,59,59,.14); font-weight: 650; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; font-size: 11.5px; color: var(--text-secondary); background: var(--surface-0); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
   .dot.live { animation: pulse 2s infinite; }
   .dot.paused { background: var(--text-muted); animation: none; }
@@ -168,6 +174,8 @@
       <div class="sub">Detection for direct &amp; indirect prompt injection, prompt leakage and tool abuse</div>
     </div>
     <div class="spacer"></div>
+    <button class="pill" id="auditPill" title="Tamper-evident audit log status">🔒 <span id="auditText">checking…</span></button>
+    <a class="btn" id="reportBtn" href="/report" target="_blank" rel="noopener">📄 Audit report</a>
     <span class="pill" id="modePill">Mode: <strong id="mode">-</strong></span>
     <span class="pill"><span class="dot live" id="liveDot"></span><span id="updated">connecting…</span></span>
     <button class="btn" id="pauseBtn" aria-pressed="false">Pause</button>
@@ -549,8 +557,20 @@ async function openDrawer(a) {
   add("Detector", a.detector);
   add("Rule", a.rule);
   const ev = el("div", { class: "block" }); ev.append(el("div", { class: "t" }, "Evidence"), el("pre", {}, a.evidence));
+  const map = el("div", { class: "block" });
+  map.append(el("div", { class: "t" }, "Framework mapping"));
+  const groups = [["OWASP LLM", a.mapping?.owasp], ["MITRE ATLAS", a.mapping?.atlas],
+                  ["EU AI Act", a.mapping?.eu_ai_act], ["BSI", a.mapping?.bsi]];
+  const mdl = el("dl", { class: "kv", style: "margin:6px 0" });
+  for (const [name, items] of groups) {
+    const dd = el("dd"); const c = el("div", { class: "chips" });
+    for (const it of items || []) c.append(el("span", { class: "chip" }, it));
+    if (!(items || []).length) c.append(el("span", { class: "chip" }, "–"));
+    dd.append(c); mdl.append(el("dt", {}, name), dd);
+  }
+  map.append(mdl);
   $("drawer").querySelector("h3").textContent = "Alert investigation";
-  body.replaceChildren(dl, ev, el("div", { class: "hint", style: "margin-top:14px" }, "Loading request…"));
+  body.replaceChildren(dl, ev, map, el("div", { class: "hint", style: "margin-top:14px" }, "Loading request…"));
   $("drawer").classList.add("open"); $("drawer").setAttribute("aria-hidden", "false");
   try {
     const r = await fetch(`/api/interaction/${a.interaction_id}`).then((x) => x.json());
@@ -589,7 +609,41 @@ function render() {
   $("modePill").style.borderColor = mode === "BLOCK" ? "rgba(208,59,59,.6)" : "var(--border)";
 }
 
+let auditState = null;
+async function loadAudit() {
+  try {
+    auditState = await fetch("/api/audit").then((r) => r.json());
+    const pill = $("auditPill");
+    pill.className = "pill " + (auditState.ok ? "ok" : "bad");
+    $("auditText").textContent = auditState.ok ? `Audit log verified · ${fmt(auditState.entries)} entries`
+                                               : `AUDIT LOG TAMPERED · ${auditState.problems.length} issue(s)`;
+  } catch (e) { $("auditText").textContent = "audit check failed"; }
+}
+$("auditPill").addEventListener("click", () => {
+  if (!auditState) return;
+  const body = $("drawerBody");
+  const head = el("div", { class: "block" });
+  head.append(el("div", { class: "t" }, "Result"),
+              el("pre", {}, auditState.ok ? `INTACT: ${auditState.entries} entries verified.\nNo record was modified, deleted or reordered.`
+                                           : `TAMPERING DETECTED: ${auditState.problems.length} problem(s).`));
+  const probs = el("div", { class: "block" });
+  if (auditState.problems.length) {
+    probs.append(el("div", { class: "t" }, "Problems"));
+    for (const p of auditState.problems) probs.append(el("pre", { style: "margin-bottom:6px" }, `audit entry #${p.audit_id}  ${p.type}\n${p.detail}`));
+  }
+  const hash = el("div", { class: "block" });
+  hash.append(el("div", { class: "t" }, "Latest chain hash"), el("pre", {}, auditState.last_hash),
+              el("div", { class: "hint", style: "margin-top:8px" },
+                 "Each log entry contains the SHA-256 hash of the previous one. Changing, deleting or reordering any record breaks the chain. " +
+                 "Store this latest hash outside the system to anchor the log."));
+  body.replaceChildren(head, probs, hash);
+  $("drawer").querySelector("h3").textContent = "Audit log integrity";
+  $("drawer").classList.add("open"); $("drawer").setAttribute("aria-hidden", "false");
+});
+
 async function load() {
+  loadAudit();
+  $("reportBtn").href = `/report?minutes=${state.minutes}`;
   $("content").classList.add("loading");          // refetch keeps the frame
   try {
     const res = await fetch(`/api/data?minutes=${state.minutes}`);

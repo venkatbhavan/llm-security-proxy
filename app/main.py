@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from app import storage
+from app import compliance, report, storage
 from app.config import CANARY_TOKEN, TOOL_ALLOWLIST
 from app.detectors.canary import check_canary
 from app.detectors.indirect import scan_tool_result
@@ -132,8 +132,11 @@ def dashboard():
 @app.get("/api/data")
 def dashboard_data(minutes: int = 60):
     """All alerts + request stats for the selected time window (minutes=0 -> everything)."""
+    alerts = storage.alerts_since(minutes)
+    for a in alerts:
+        a["mapping"] = compliance.map_alert(a)
     return {"mode": MODE, "minutes": minutes,
-            "alerts": storage.alerts_since(minutes),
+            "alerts": alerts,
             "emails": storage.emails_since(minutes),
             "requests": storage.request_stats(minutes)}
 
@@ -142,3 +145,15 @@ def dashboard_data(minutes: int = 60):
 def interaction(interaction_id: int):
     """Full record behind an alert: prompt, response, tool calls - for the analyst drill-down."""
     return storage.get_interaction(interaction_id) or {"error": "not found"}
+
+
+@app.get("/api/audit")
+def audit():
+    """Verify the tamper-evident audit log (hash chain + comparison with live records)."""
+    return storage.verify_audit()
+
+
+@app.get("/report", response_class=HTMLResponse)
+def assessment_report(minutes: int = 0):
+    """Print-ready security assessment report (open in browser -> Print -> Save as PDF)."""
+    return report.build_report(minutes, MODE)

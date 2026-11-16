@@ -93,6 +93,43 @@ def test_indirect_monitor_mode_keeps_text():
     assert alerts and out == raw
 
 
+def _fresh_storage(tmp_name):
+    import tempfile
+    from app import storage
+    storage.DB_PATH = os.path.join(tempfile.mkdtemp(), tmp_name)
+    storage.init_db()
+    return storage
+
+
+def test_audit_chain_intact_then_detects_edit():
+    import sqlite3
+    st = _fresh_storage("audit1.db")
+    iid = st.log_interaction("s1", "10.0.0.1", "hi", "hello", [], False)
+    st.log_alert(iid, "s1", "10.0.0.1", {"detector": "rules", "severity": "HIGH", "rule": "x", "evidence": "e"})
+    assert st.verify_audit()["ok"]
+    c = sqlite3.connect(st.DB_PATH); c.execute("UPDATE alerts SET severity='LOW'"); c.commit(); c.close()
+    r = st.verify_audit()
+    assert not r["ok"] and r["problems"][0]["type"] == "record_modified"
+
+
+def test_audit_chain_detects_deleted_entry():
+    import sqlite3
+    st = _fresh_storage("audit2.db")
+    for i in range(3):
+        st.log_interaction("s", "ip", f"p{i}", "r", [], False)
+    c = sqlite3.connect(st.DB_PATH); c.execute("DELETE FROM audit_log WHERE id = 2"); c.commit(); c.close()
+    assert any(p["type"] == "chain_broken" for p in st.verify_audit()["problems"])
+
+
+def test_compliance_mapping():
+    from app.compliance import map_alert
+    m = map_alert({"rule": "override_instructions,system_prompt_extraction", "detector": "rules"})
+    assert "LLM01:2025 Prompt Injection" in m["owasp"] and "LLM07:2025 System Prompt Leakage" in m["owasp"]
+    assert any("AML.T0056" in x for x in m["atlas"])
+    ind = map_alert({"rule": "fake_boundary,exfil_instruction", "detector": "indirect"})
+    assert any("AML.T0051.001" in x for x in ind["atlas"])
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
