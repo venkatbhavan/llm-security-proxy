@@ -2,7 +2,7 @@
 
 mock   - fake, deliberately vulnerable model. Lets you build and test the whole
          pipeline with no API key and no cost.
-openai - real Chat Completions API call via httpx.
+api    - any OpenAI-compatible Chat Completions API (Gemini, Groq, Ollama, OpenAI).
 
 call_llm(messages) takes the full message list (system, user, assistant, tool)
 so the model can read tool results and act on them - which is exactly what
@@ -12,11 +12,12 @@ Returns: {"content": str, "tool_calls": [{"id": str, "name": str, "arguments": d
 """
 import json
 import re
+import time
 import uuid
 
 import httpx
 
-from app.config import CANARY_TOKEN, LLM_MODE, OPENAI_API_KEY, OPENAI_MODEL, SYSTEM_PROMPT
+from app.config import CANARY_TOKEN, LLM_API_KEY, LLM_BASE_URL, LLM_MODE, LLM_MODEL, SYSTEM_PROMPT
 from app.tools import TOOL_SCHEMAS
 
 
@@ -83,23 +84,45 @@ def _mock_llm(messages):
     return {"content": "I can help with orders, shipping and returns.", "tool_calls": []}
 
 
-def _openai_llm(messages):
-    r = httpx.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-        json={"model": OPENAI_MODEL, "messages": messages, "tools": TOOL_SCHEMAS},
-        timeout=60,
-    )
-    r.raise_for_status()
+def _api_llm(messages, retries=4):
+    """Any OpenAI-compatible Chat Completions API (Gemini, Groq, Ollama, OpenAI)."""
+    for attempt in range(retries + 1):
+        r = httpx.post(
+            f"{LLM_BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+            json={"model": LLM_MODEL, "messages": messages, "tools": TOOL_SCHEMAS},
+            timeout=90,
+        )
+        if r.status_code in (429, 503) and attempt < retries:   # free-tier rate limit: wait and retry
+            wait = float(r.headers.get("retry-after", 0) or 0) or 5 * (attempt + 1)
+            time.sleep(min(wait, 60))
+            continue
+        if r.status_code >= 400:
+            raise RuntimeError(f"LLM API error {r.status_code}: {r.text[:300]}")
+        break
     msg = r.json()["choices"][0]["message"]
-    calls = [{"id": tc["id"], "name": tc["function"]["name"],
-              "arguments": json.loads(tc["function"]["arguments"] or "{}")}
-             for tc in (msg.get("tool_calls") or [])]
-    return {"content": msg.get("content") or "", "tool_calls": calls}
+    calls = []
+    for tc in msg.get("tool_calls") or []:
+        args = tc["function"].get("arguments") or "{}"
+        calls.append({"id": tc.get("id") or f"call_{uuid.uuid4().hex[:8]}",   # some providers omit ids
+                      "name": tc["function"]["name"],
+                      "arguments": args if isinstance(args, dict) else json.loads(args)})
+    # Keep the provider's original tool_call objects: some (e.g. Gemini 3.x "thought_signature" in
+    # extra_content) must be echoed back unchanged in the next request, or the API rejects it.
+    raw = msg.get("tool_calls") or []
+    for orig, norm in zip(raw, calls):
+        orig["id"] = norm["id"]                      # ensure ids match the tool results we send back
+        if isinstance(orig.get("function", {}).get("arguments"), dict):
+            orig["function"]["arguments"] = json.dumps(orig["function"]["arguments"])
+        orig.setdefault("type", "function")
+        if "googleapis.com" in LLM_BASE_URL:      # Gemini only: documented fallback if no signature came back
+            sig = orig.setdefault("extra_content", {}).setdefault("google", {})
+            sig.setdefault("thought_signature", "skip_thought_signature_validator")
+    return {"content": msg.get("content") or "", "tool_calls": calls, "raw_tool_calls": raw}
 
 
 def call_llm(messages):
-    return _openai_llm(messages) if LLM_MODE == "openai" else _mock_llm(messages)
+    return _mock_llm(messages) if LLM_MODE == "mock" else _api_llm(messages)
 
 
 def start_messages(user_prompt):

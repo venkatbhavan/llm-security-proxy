@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app import compliance, report, storage
-from app.config import CANARY_TOKEN, TOOL_ALLOWLIST
+from app.config import CANARY_TOKEN, MODEL_LABEL, TOOL_ALLOWLIST
 from app.detectors.canary import check_canary
 from app.detectors.indirect import scan_tool_result
 from app.detectors.rules import check_prompt
@@ -58,12 +58,18 @@ def chat(body: ChatIn, request: Request):
     messages = start_messages(body.message)
     executed = []
     response = ""
+    llm_error = None
     for _ in range(MAX_TOOL_ROUNDS):
-        llm = call_llm(messages)
+        try:
+            llm = call_llm(messages)
+        except Exception as e:  # provider down / rate limit / bad key: answer gracefully, keep the evidence
+            llm_error = str(e)[:300]
+            response = response or "Sorry, the assistant is temporarily unavailable."
+            break
         response = llm["content"]
         if not llm["tool_calls"]:
             break
-        messages.append({"role": "assistant", "content": response or None, "tool_calls": [
+        messages.append({"role": "assistant", "content": response or None, "tool_calls": llm.get("raw_tool_calls") or [
             {"id": tc["id"], "type": "function",
              "function": {"name": tc["name"], "arguments": json.dumps(tc["arguments"])}}
             for tc in llm["tool_calls"]]})
@@ -72,15 +78,22 @@ def chat(body: ChatIn, request: Request):
             # 3) Tool-call monitoring (Phase 4 + honey tools)
             t_alerts, allowed = check_tool_call(tc["name"], tc["arguments"], CANARY_TOKEN)
             alerts += t_alerts
-            if (allowed or MODE == "MONITOR") and tc["name"] in TOOL_FUNCS:
-                result = TOOL_FUNCS[tc["name"]](**tc["arguments"])
+            permitted = allowed or MODE == "MONITOR"
+            if permitted and tc["name"] in TOOL_FUNCS:
+                try:
+                    result = TOOL_FUNCS[tc["name"]](**tc["arguments"])
+                except TypeError as e:  # real models sometimes send missing/extra arguments
+                    result = {"error": f"invalid arguments: {e}"}
+            elif permitted:
+                result = {"error": f"unknown tool {tc['name']}"}
             else:
                 result = {"error": "blocked by security proxy"}
 
             if tc["name"] == "send_email":   # every attempt lands in the outbox view, sent or not
                 domain = str(tc["arguments"].get("to", "")).split("@")[-1].lower()
                 sent = isinstance(result, dict) and result.get("status") == "sent"
-                storage.log_email(session_id, source_ip, tc["arguments"], "SENT" if sent else "BLOCKED",
+                status = "SENT" if sent else ("BLOCKED" if not permitted else "FAILED")
+                storage.log_email(session_id, source_ip, tc["arguments"], status,
                                   domain not in TOOL_ALLOWLIST["send_email"]["allowed_domains"],
                                   result.get("file") if sent else None)
 
@@ -108,7 +121,8 @@ def chat(body: ChatIn, request: Request):
     for a in alerts:
         storage.log_alert(iid, session_id, source_ip, a)
 
-    return {"session_id": session_id, "source_ip": source_ip, "reply": final,
+    return {"session_id": session_id, "source_ip": source_ip, "reply": final, "model": MODEL_LABEL,
+            "llm_error": llm_error,
             "debug": {"risk_score": score, "alerts": alerts, "tool_calls": executed}}
 
 
@@ -135,7 +149,7 @@ def dashboard_data(minutes: int = 60):
     alerts = storage.alerts_since(minutes)
     for a in alerts:
         a["mapping"] = compliance.map_alert(a)
-    return {"mode": MODE, "minutes": minutes,
+    return {"mode": MODE, "model": MODEL_LABEL, "minutes": minutes,
             "alerts": alerts,
             "emails": storage.emails_since(minutes),
             "requests": storage.request_stats(minutes)}

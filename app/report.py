@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 from app import compliance, storage
+from app.config import MODEL_LABEL
 
 AUTHOR = os.getenv("REPORT_AUTHOR", "LLM Security Proxy (automated)")
 SYSTEM_NAME = os.getenv("REPORT_SYSTEM", "ExampleShop HelpBot (LLM customer-support assistant)")
@@ -185,6 +186,7 @@ def build_report(minutes: int, mode: str) -> str:
     <dt>Report ID</dt><dd class="mono">{_e(report_id)}</dd><dt>Generated</dt><dd>{generated:%Y-%m-%d %H:%M %Z}</dd>
     <dt>System assessed</dt><dd>{_e(SYSTEM_NAME)}</dd><dt>Reporting period</dt><dd>{_e(period)}</dd>
     <dt>Prepared by</dt><dd>{_e(AUTHOR)}</dd><dt>Proxy mode</dt><dd>{_e(mode)}</dd>
+    <dt>LLM under test</dt><dd>{_e(MODEL_LABEL)}</dd><dt></dt><dd></dd>
   </dl>
 
   <h2>1. Executive summary</h2>

@@ -66,8 +66,8 @@ user ──► [1. input rules] ──► LLM ──► [4. canary check] ──
 
 ## Results
 
-Evaluated with `scripts/run_attacks.py` (13 attack prompts, 11 benign prompts) against a
-deliberately vulnerable mock model:
+Evaluated with `scripts/run_attacks.py` (13 attack prompts, 11 benign prompts) against the
+built-in, deliberately vulnerable test model (real-model runs: see `results/`):
 
 | # | Attack | Input rules | Canary | Tool monitor / honey / indirect |
 |---|--------|:-----------:|:------:|:-------------------------------:|
@@ -146,6 +146,30 @@ open the email the AI "sent" to the attacker and see exactly what leaked, e.g. t
 prompt including the canary key. In BLOCK mode the attempt is recorded as BLOCKED and no
 file is written. Nothing ever leaves the machine.
 
+## Testing against a real LLM
+
+The proxy works with any OpenAI-compatible API. Copy `.env.example` to `.env` and pick one:
+
+| Provider | Cost | `LLM_BASE_URL` |
+|---|---|---|
+| Google Gemini | free tier | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| Groq (open models) | free tier | `https://api.groq.com/openai/v1` |
+| Ollama (local, offline) | free | `http://localhost:11434/v1` |
+
+Then run the suite with a pause between prompts to respect free-tier rate limits:
+
+```bash
+python scripts/run_attacks.py --delay 6
+```
+
+Each run measures **two different things** and saves them to `results/<date>_<model>.md`:
+
+- **Did the model fall for it?** (leaked the canary, called a decoy tool, emailed an outside address): the model's own robustness
+- **Did the proxy detect it?** The detection layers' coverage
+
+Real models refuse many direct attacks on their own, so "not detected" is only a gap if the model actually complied.
+The key metric is **undetected successful attacks**.
+
 ## Project structure
 
 ```
@@ -209,7 +233,8 @@ detector=* severity=HIGH | stats count by src_ip | sort -count     (top attackin
 
 ## Roadmap
 
-- [ ] Evaluation against a production LLM
+- [x] Support for real LLMs (Gemini, Groq, Ollama, OpenAI) with attack-success vs detection metrics
+- [ ] Published comparison of real models
 - [x] Source IP / client attribution on every alert
 - [ ] Session-level risk scoring for multi-turn attacks
 - [x] Assessment report with framework mapping and control matrix
