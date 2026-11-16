@@ -107,10 +107,19 @@ curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" \
 - **Alerts over time**, stacked by severity, with hover details per time bucket
 - **Alerts by detection layer, top source IPs, top detection rules**: click a bar to filter
 - **Filters:** time range (15 min / 1 h / 24 h / all), severity, detector, source IP, free-text search
+- **Outbox**: every email the AI tried to send (recipient, subject, body), marked SENT or BLOCKED, with external recipients flagged. Click to read the full email
 - **Alert feed** with severity badges; click a row to **investigate**: full prompt, model response, tool calls and the proxy's decision
 - **Test console** to send messages through the proxy from the browser
 
 All attacker-controlled text is rendered with `textContent`, so a malicious prompt cannot execute in the analyst's browser (stored-XSS protection).
+
+## Realistic exfiltration evidence
+
+`send_email` does not just return "ok": it writes a real RFC-822 email (`.eml`, opens in
+Outlook or Thunderbird) to `logs/outbox/`. When an attack succeeds in MONITOR mode, you can
+open the email the AI "sent" to the attacker and see exactly what leaked, e.g. the system
+prompt including the canary key. In BLOCK mode the attempt is recorded as BLOCKED and no
+file is written. Nothing ever leaves the machine.
 
 ## Project structure
 

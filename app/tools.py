@@ -7,8 +7,12 @@ ToolMonitor in the proxy unchanged - it only looks at (tool_name, arguments).
 import json
 import os
 import re
+import uuid
+from datetime import datetime
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 
-from app.config import HONEY_CREDENTIAL, HONEY_TOOLS, TOOL_ALLOWLIST
+from app.config import DB_PATH, HONEY_CREDENTIAL, HONEY_TOOLS, TOOL_ALLOWLIST
 
 # Tool schemas sent to the LLM (OpenAI function-calling format)
 TOOL_SCHEMAS = [
@@ -49,8 +53,28 @@ def search_orders(query, max_results=5):
     return {"results": [{"order_id": "A1001", "status": "shipped"}][:max_results]}
 
 
+OUTBOX_DIR = os.path.join(os.path.dirname(DB_PATH) or ".", "outbox")
+SENDER = "helpbot@exampleshop.com"
+
+
 def send_email(to, body, subject=""):
-    return {"status": "queued (fake)", "to": to}
+    """Writes a real RFC-822 email (.eml - opens in Outlook/Thunderbird) to logs/outbox/
+    instead of sending it over the internet. Realistic evidence, zero real-world harm."""
+    os.makedirs(OUTBOX_DIR, exist_ok=True)
+    msg = EmailMessage()
+    msg["From"] = SENDER
+    msg["To"] = to
+    msg["Subject"] = subject or "(no subject)"
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="exampleshop.com")
+    msg["X-Sent-By"] = "LLM support assistant (via security proxy lab)"
+    msg.set_content(body)
+    safe_to = re.sub(r"[^A-Za-z0-9@._-]", "_", to)[:60]
+    filename = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}-{safe_to}.eml"
+    with open(os.path.join(OUTBOX_DIR, filename), "w", encoding="utf-8") as f:
+        f.write(msg.as_string())
+    return {"status": "sent", "to": to, "subject": msg["Subject"], "message_id": msg["Message-ID"],
+            "file": f"logs/outbox/{filename}"}
 
 
 REVIEWS_FILE = os.path.join(os.path.dirname(__file__), "data", "reviews.json")

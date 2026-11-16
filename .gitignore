@@ -4,3 +4,4 @@ logs/*.db
 logs/*.jsonl
 .env
 .pytest_cache/
+logs/outbox/

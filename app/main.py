@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app import storage
-from app.config import CANARY_TOKEN
+from app.config import CANARY_TOKEN, TOOL_ALLOWLIST
 from app.detectors.canary import check_canary
 from app.detectors.indirect import scan_tool_result
 from app.detectors.rules import check_prompt
@@ -77,6 +77,13 @@ def chat(body: ChatIn, request: Request):
             else:
                 result = {"error": "blocked by security proxy"}
 
+            if tc["name"] == "send_email":   # every attempt lands in the outbox view, sent or not
+                domain = str(tc["arguments"].get("to", "")).split("@")[-1].lower()
+                sent = isinstance(result, dict) and result.get("status") == "sent"
+                storage.log_email(session_id, source_ip, tc["arguments"], "SENT" if sent else "BLOCKED",
+                                  domain not in TOOL_ALLOWLIST["send_email"]["allowed_domains"],
+                                  result.get("file") if sent else None)
+
             # 4) Indirect injection: scan what the tool returned BEFORE the model reads it.
             #    MONITOR -> alert only (attack plays out, so you can see it);
             #    BLOCK   -> alert + quarantine the poisoned text.
@@ -127,6 +134,7 @@ def dashboard_data(minutes: int = 60):
     """All alerts + request stats for the selected time window (minutes=0 -> everything)."""
     return {"mode": MODE, "minutes": minutes,
             "alerts": storage.alerts_since(minutes),
+            "emails": storage.emails_since(minutes),
             "requests": storage.request_stats(minutes)}
 
 

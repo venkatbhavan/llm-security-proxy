@@ -24,6 +24,10 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts TEXT, interaction_id INTEGER, source_ip TEXT, session_id TEXT,
             detector TEXT, severity TEXT, rule TEXT, evidence TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT, session_id TEXT, source_ip TEXT, recipient TEXT, subject TEXT,
+            body TEXT, status TEXT, external INTEGER, file TEXT)""")
         # Upgrade databases created by older versions (no source_ip/session_id columns yet)
         for table, column in [("interactions", "source_ip"), ("alerts", "source_ip"),
                               ("alerts", "session_id")]:
@@ -99,3 +103,18 @@ def get_interaction(interaction_id):
         d = dict(r)
         d["tool_calls"] = json.loads(d["tool_calls"] or "[]")
         return d
+
+
+def log_email(session_id, source_ip, args, status, external, file=None):
+    with _conn() as c:
+        c.execute("INSERT INTO outbox (ts, session_id, source_ip, recipient, subject, body, status, external, file) "
+                  "VALUES (?,?,?,?,?,?,?,?,?)",
+                  (now(), session_id, source_ip, str(args.get("to", "")), str(args.get("subject", "") or "(no subject)"),
+                   str(args.get("body", "")), status, int(external), file))
+
+
+def emails_since(minutes, limit=200):
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM outbox WHERE ts >= ? ORDER BY ts DESC, id DESC LIMIT ?",
+                         (_cutoff(minutes), limit)).fetchall()
+        return [dict(r) for r in rows]
