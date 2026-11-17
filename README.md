@@ -6,7 +6,7 @@ between users and an LLM chatbot, logs every prompt, response and tool call in a
 abuse and indirect prompt injection, maps every detection to **OWASP LLM Top 10, MITRE ATLAS,
 the EU AI Act and BSI guidance**, and generates a **printable security assessment report**.
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-proxy-green) ![OWASP LLM Top 10](https://img.shields.io/badge/OWASP-LLM%20Top%2010-red) ![tests](https://img.shields.io/badge/tests-18%20passing-brightgreen) ![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Art.%2012%20%7C%2015-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-proxy-green) ![OWASP LLM Top 10](https://img.shields.io/badge/OWASP-LLM%20Top%2010-red) ![tests](https://img.shields.io/badge/tests-19%20passing-brightgreen) ![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Art.%2012%20%7C%2015-blue)
 
 ---
 
@@ -17,6 +17,15 @@ databases). Attackers don't need exploits: a well-crafted sentence can make the 
 its instructions, misuse a tool, or follow instructions hidden in a document it reads.
 Most applications have no visibility into this. This project applies classic SOC
 principles (logging, layered detection, alerting, runbooks) to that new attack surface.
+
+## Live demo
+
+**▶ [Open the public demo](https://YOUR-RENDER-URL.onrender.com)** *(free hosting: the first visit can take about a minute to wake up)*
+
+The public demo runs in **demo mode**: a built-in, deliberately vulnerable test model (no API key on the
+server), per-IP rate limiting, a message-length cap, and sample attacks pre-loaded from documentation-only IP
+ranges (RFC 5737). Try your own prompt injection in the test console, then open the alert, the outbox and the
+audit report. Real-model results are in [`results/`](results/).
 
 ## Security + compliance in one tool
 
@@ -170,6 +179,12 @@ Each run measures **two different things** and saves them to `results/<date>_<mo
 Real models refuse many direct attacks on their own, so "not detected" is only a gap if the model actually complied.
 The key metric is **undetected successful attacks**.
 
+## Deploying the demo (Render)
+
+`render.yaml` deploys the public demo from this repository: Render → **New → Blueprint** → select the repo.
+It sets `DEMO_MODE=true`, so **no API key is ever placed on the public server**. Never deploy with a real key
+and an open test console: anyone could spend your quota.
+
 ## Project structure
 
 ```
@@ -181,6 +196,7 @@ app/
   storage.py           SQLite logging, JSONL alert export, tamper-evident audit chain
   compliance.py        rule -> OWASP / MITRE ATLAS / EU AI Act / BSI mapping + control matrix
   report.py            printable security assessment report
+  ratelimit.py         per-IP rate limiting for the public demo
   config.py            canary, honey tools, allowlist
   detectors/
     rules.py           direct injection rules

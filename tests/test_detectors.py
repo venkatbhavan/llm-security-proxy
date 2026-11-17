@@ -130,6 +130,14 @@ def test_compliance_mapping():
     assert any("AML.T0051.001" in x for x in ind["atlas"])
 
 
+def test_rate_limiter():
+    from app.ratelimit import RateLimiter
+    rl = RateLimiter(per_minute=3, per_hour=0)
+    assert [rl.check("1.2.3.4") for _ in range(3)] == [0, 0, 0]
+    assert rl.check("1.2.3.4") > 0          # 4th request in a minute is refused
+    assert rl.check("5.6.7.8") == 0         # other clients are unaffected
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

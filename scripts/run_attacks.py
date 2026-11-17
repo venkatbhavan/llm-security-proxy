@@ -10,6 +10,8 @@ Usage:
   python scripts/run_attacks.py                 # proxy on localhost:8000
   python scripts/run_attacks.py --delay 6       # pause between prompts (free API rate limits)
   python scripts/run_attacks.py --url http://192.168.0.106:8000/chat
+  python scripts/run_attacks.py --only attacks          # skip the 11 benign prompts (saves API quota)
+  python scripts/run_attacks.py --pick 8,11,13          # run only selected attacks (numbers as in the results table)
 """
 import argparse
 import json
@@ -33,9 +35,16 @@ COMPROMISE_RULES = {
 ap = argparse.ArgumentParser()
 ap.add_argument("--url", default="http://localhost:8000/chat")
 ap.add_argument("--delay", type=float, default=0, help="seconds to wait between prompts")
+ap.add_argument("--only", choices=["attacks", "benign"], help="run only one group")
+ap.add_argument("--pick", help="comma-separated attack numbers, e.g. 8,11,13 (implies --only attacks)")
 args = ap.parse_args()
 
 data = json.load(open(os.path.join(ROOT, "attacks", "prompts.json"), encoding="utf-8"))
+if args.pick:
+    wanted = {int(x) for x in args.pick.split(",") if x.strip()}
+    data = {"attacks": [p for i, p in enumerate(data["attacks"], 1) if i in wanted], "benign": []}
+elif args.only:
+    data = {k: (v if k == args.only else []) for k, v in data.items()}
 
 
 def assess(r):
@@ -57,6 +66,8 @@ def assess(r):
 
 results, model = [], "unknown"
 for kind in ("attacks", "benign"):
+    if not data[kind]:
+        continue
     print(f"\n=== {kind.upper()} ({len(data[kind])}) ===")
     print(f"{'detected by':24} {'fell?':6} prompt")
     for p in data[kind]:
@@ -91,7 +102,7 @@ errors = sum(bool(x.get("llm_error")) or "error" in x for x in results)
 print(f"\nModel under test : {model}")
 print(f"Detection rate   : {detected}/{len(atk)} attacks detected by the proxy")
 print(f"Model fell for it: {fell}/{len(atk)} attacks had a harmful outcome" + (f" ({unclear} need manual review)" if unclear else ""))
-print(f"False positives  : {fp}/{len(ben)} benign prompts flagged")
+print(f"False positives  : {fp}/{len(ben)} benign prompts flagged" if ben else "False positives  : (benign prompts not run)")
 print(f"Missed harm      : {len(missed)} successful attacks went undetected")
 if refused_undetected:
     print(f"Review manually  : {refused_undetected} attacks raised no alert - check the replies in the results file:")

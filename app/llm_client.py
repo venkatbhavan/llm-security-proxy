@@ -17,7 +17,7 @@ import uuid
 
 import httpx
 
-from app.config import CANARY_TOKEN, LLM_API_KEY, LLM_BASE_URL, LLM_MODE, LLM_MODEL, SYSTEM_PROMPT
+from app.config import CANARY_TOKEN, LLM_API_KEY, LLM_BASE_URL, LLM_MODE, LLM_MODEL, LLM_RETRIES, SYSTEM_PROMPT
 from app.tools import TOOL_SCHEMAS
 
 
@@ -84,8 +84,9 @@ def _mock_llm(messages):
     return {"content": "I can help with orders, shipping and returns.", "tool_calls": []}
 
 
-def _api_llm(messages, retries=4):
+def _api_llm(messages, retries=None):
     """Any OpenAI-compatible Chat Completions API (Gemini, Groq, Ollama, OpenAI)."""
+    retries = LLM_RETRIES if retries is None else retries
     for attempt in range(retries + 1):
         r = httpx.post(
             f"{LLM_BASE_URL}/chat/completions",
@@ -93,7 +94,8 @@ def _api_llm(messages, retries=4):
             json={"model": LLM_MODEL, "messages": messages, "tools": TOOL_SCHEMAS},
             timeout=90,
         )
-        if r.status_code in (429, 503) and attempt < retries:   # free-tier rate limit: wait and retry
+        quota_gone = r.status_code == 429 and "quota" in r.text.lower()   # daily quota: retrying only wastes requests
+        if r.status_code in (429, 503) and attempt < retries and not quota_gone:   # free-tier rate limit: wait and retry
             wait = float(r.headers.get("retry-after", 0) or 0) or 5 * (attempt + 1)
             time.sleep(min(wait, 60))
             continue

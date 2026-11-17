@@ -9,11 +9,20 @@ except ImportError:
 
 # LLM_MODE=mock -> built-in deliberately vulnerable test model (no key, no cost)
 # LLM_MODE=api  -> any OpenAI-compatible API: Gemini, Groq, Ollama, OpenAI
-LLM_MODE = os.getenv("LLM_MODE", "mock").lower()
+# DEMO_MODE=true -> public website: never uses an API key, rate-limited, pre-filled with sample data
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() in ("1", "true", "yes")
+LLM_MODE = "mock" if DEMO_MODE else os.getenv("LLM_MODE", "mock").lower()
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-MODEL_LABEL = "mock (test model)" if LLM_MODE == "mock" else LLM_MODEL
+LLM_RETRIES = int(os.getenv("LLM_RETRIES", "1"))   # retries on 429/503: each retry uses free-tier quota
+MODEL_LABEL = ("mock (public demo)" if DEMO_MODE else "mock (test model)") if LLM_MODE == "mock" else LLM_MODEL
+GITHUB_URL = os.getenv("GITHUB_URL", "https://github.com/venkatbhavan/llm-security-proxy")
+
+# Abuse protection for the public demo (per client IP)
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10" if DEMO_MODE else "0"))   # 0 = off
+RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "60" if DEMO_MODE else "0"))
+MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "1000" if DEMO_MODE else "20000"))
 
 DB_PATH = os.getenv("DB_PATH", "logs/proxy.db")
 

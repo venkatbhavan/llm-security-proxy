@@ -55,6 +55,9 @@
          padding: 6px 12px; border-radius: 8px; }
   .btn:hover { background: var(--surface-2); color: var(--text-primary); }
 
+  #demoBanner { display: none; margin: -4px 0 16px; padding: 10px 14px; border-radius: 8px; font-size: 13px;
+                border: 1px solid rgba(109,167,236,.5); background: rgba(109,167,236,.10); color: var(--text-secondary); }
+  #demoBanner a { color: var(--sev-low); }
   /* Filters: one row above everything they scope */
   .filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -183,6 +186,7 @@
     <button class="btn" id="pauseBtn" aria-pressed="false">Pause</button>
   </header>
 
+  <div id="demoBanner" role="note"></div>
   <!-- Filters: one row, scope everything below -->
   <div class="filters" role="toolbar" aria-label="Filters">
     <div class="seg" id="range" aria-label="Time range">
@@ -607,6 +611,15 @@ function render() {
   renderTable(alerts);
   renderOutbox();
   $("modelName").textContent = state.data.model || "-";
+  if (state.data.demo) {
+    const b = $("demoBanner");
+    b.replaceChildren(document.createTextNode("🧪 Public demo: runs on a built-in, deliberately vulnerable test model (no real AI, no API key). " +
+      "Sample attacks from documentation-only IPs are pre-loaded; data resets when the server restarts. " +
+      "Try your own attack in the test console below. Results against real models (Gemini) and source code: "));
+    const a = el("a", { href: state.data.github, target: "_blank", rel: "noopener" }, "GitHub");
+    b.append(a);
+    b.style.display = "block";
+  }
   const mode = state.data.mode;
   $("mode").textContent = mode === "BLOCK" ? "⛔ BLOCK" : "👁 MONITOR";
   $("modePill").style.borderColor = mode === "BLOCK" ? "rgba(208,59,59,.6)" : "var(--border)";
@@ -684,8 +697,15 @@ $("consoleForm").addEventListener("submit", async (e) => {
   try {
     const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" },
                                      body: JSON.stringify({ message: msg }) }).then((x) => x.json());
+    if (r.error) { out.replaceChildren(el("div", { class: "hint", style: "color:#ff8a8a" }, "⚠ " + r.error)); return; }
     const block = el("div", { class: "block" });
     block.append(el("div", { class: "t" }, "Reply to user"), el("pre", {}, r.reply));
+    if (r.llm_error) {
+      const err = el("div", { class: "block" });
+      err.append(el("div", { class: "t" }, "⚠ AI provider error (" + (r.model || "model") + ")"),
+                 el("pre", { style: "color:#ff8a8a" }, r.llm_error));
+      block.append(err);
+    }
     const al = el("div", { class: "block" });
     al.append(el("div", { class: "t" }, r.debug.alerts.length ? `${r.debug.alerts.length} alert(s) raised` : "No alerts"));
     for (const a of r.debug.alerts) {

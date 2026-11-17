@@ -1,0 +1,19 @@
+# Render blueprint: public demo of the LLM Security Monitoring Proxy.
+# Runs in DEMO_MODE: built-in test model only (no API key on the server), per-IP rate limiting,
+# sample data generated at startup. Storage is ephemeral on the free plan (resets on restart).
+services:
+  - type: web
+    name: llm-security-proxy-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # --proxy-headers: take the visitor's real IP from Render's load balancer (X-Forwarded-For)
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /api/audit
+    envVars:
+      - key: DEMO_MODE
+        value: "true"
+      - key: PROXY_MODE
+        value: MONITOR
+      - key: PYTHON_VERSION
+        value: "3.12.8"

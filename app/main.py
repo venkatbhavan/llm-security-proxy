@@ -11,11 +11,14 @@ import os
 import uuid
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app import compliance, report, storage
-from app.config import CANARY_TOKEN, MODEL_LABEL, TOOL_ALLOWLIST
+from app.config import (CANARY_TOKEN, DEMO_MODE, GITHUB_URL, MAX_MESSAGE_CHARS, MODEL_LABEL,
+                        RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE, TOOL_ALLOWLIST)
+from app.ratelimit import RateLimiter
 from app.detectors.canary import check_canary
 from app.detectors.indirect import scan_tool_result
 from app.detectors.rules import check_prompt
@@ -31,6 +34,7 @@ SAFE_REPLY = "Sorry, I can't help with that request."
 
 app = FastAPI(title="LLM Security Monitoring Proxy")
 storage.init_db()
+limiter = RateLimiter(RATE_LIMIT_PER_MINUTE, RATE_LIMIT_PER_HOUR)
 
 
 class ChatIn(BaseModel):
@@ -46,8 +50,14 @@ def client_ip(request: Request) -> str:
 
 @app.post("/chat")
 def chat(body: ChatIn, request: Request):
-    session_id = body.session_id or str(uuid.uuid4())
     source_ip = client_ip(request)
+    if len(body.message) > MAX_MESSAGE_CHARS:
+        return JSONResponse({"error": f"Message too long (max {MAX_MESSAGE_CHARS} characters)."}, status_code=413)
+    retry_after = limiter.check(source_ip)
+    if retry_after:
+        return JSONResponse({"error": "Rate limit reached - please wait a moment.", "retry_after": retry_after},
+                            status_code=429, headers={"Retry-After": str(retry_after)})
+    session_id = body.session_id or str(uuid.uuid4())
     alerts = []
 
     # 1) Input: rule-based injection detection (Phase 3)
@@ -149,7 +159,7 @@ def dashboard_data(minutes: int = 60):
     alerts = storage.alerts_since(minutes)
     for a in alerts:
         a["mapping"] = compliance.map_alert(a)
-    return {"mode": MODE, "model": MODEL_LABEL, "minutes": minutes,
+    return {"mode": MODE, "model": MODEL_LABEL, "demo": DEMO_MODE, "github": GITHUB_URL, "minutes": minutes,
             "alerts": alerts,
             "emails": storage.emails_since(minutes),
             "requests": storage.request_stats(minutes)}
@@ -171,3 +181,23 @@ def audit():
 def assessment_report(minutes: int = 0):
     """Print-ready security assessment report (open in browser -> Print -> Save as PDF)."""
     return report.build_report(minutes, MODE)
+
+
+# ---------------- Public demo: pre-fill with sample attacks ----------------
+def seed_demo_data():
+    """On a fresh demo instance, run the attack suite once so visitors see a populated dashboard.
+    Uses documentation-only IP ranges (RFC 5737), so no real address appears as an attacker."""
+    if not DEMO_MODE or storage.request_stats(0)["total"] > 0:
+        return
+    from types import SimpleNamespace
+    prompts = json.load(open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "attacks", "prompts.json"),
+                             encoding="utf-8"))
+    attackers = ["203.0.113.24", "198.51.100.77", "203.0.113.91"]
+    for i, p in enumerate(prompts["attacks"]):
+        chat(ChatIn(message=p), SimpleNamespace(client=SimpleNamespace(host=attackers[i % 3])))
+    for p in prompts["benign"]:
+        chat(ChatIn(message=p), SimpleNamespace(client=SimpleNamespace(host="192.0.2.15")))
+    limiter.reset()
+
+
+seed_demo_data()
