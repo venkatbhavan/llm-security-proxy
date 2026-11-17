@@ -20,7 +20,7 @@ principles (logging, layered detection, alerting, runbooks) to that new attack s
 
 ## Live demo
 
-**▶ [Open the public demo](https://YOUR-RENDER-URL.onrender.com)** *(free hosting: the first visit can take about a minute to wake up)*
+**▶ [Open the public demo](https://llm-security-proxy-demo.onrender.com)** *(free hosting: the first visit can take about a minute to wake up)*
 
 The public demo runs in **demo mode**: a built-in, deliberately vulnerable test model (no API key on the
 server), per-IP rate limiting, a message-length cap, and sample attacks pre-loaded from documentation-only IP
@@ -114,7 +114,7 @@ cd llm-security-proxy
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 python -m pip install -r requirements.txt
-python -m pytest -q                # 15 tests
+python -m pytest -q                # 19 tests
 python -m uvicorn app.main:app --reload
 ```
 
@@ -122,7 +122,7 @@ python -m uvicorn app.main:app --reload
 - API docs / manual testing: <http://localhost:8000/docs>
 - Attack suite (second terminal): `python scripts/run_attacks.py`
 - Block mode: `PROXY_MODE=BLOCK` (PowerShell: `$env:PROXY_MODE="BLOCK"`) before starting the server
-- Real model: set `LLM_MODE=openai` and `OPENAI_API_KEY` (see `.env.example`). The default `mock` mode needs no key.
+- Real model: copy `.env.example` to `.env` and set `LLM_MODE=api`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` (see [Testing against a real LLM](#testing-against-a-real-llm)). The default `mock` mode needs no key.
 
 Example attack:
 ```bash
@@ -168,8 +168,13 @@ The proxy works with any OpenAI-compatible API. Copy `.env.example` to `.env` an
 Then run the suite with a pause between prompts to respect free-tier rate limits:
 
 ```bash
-python scripts/run_attacks.py --delay 6
+python scripts/run_attacks.py --delay 6                  # full suite (13 attacks + 11 benign)
+python scripts/run_attacks.py --only attacks --delay 10  # attacks only: saves free-tier quota
+python scripts/run_attacks.py --pick 8,11,13 --delay 10  # selected attacks only
 ```
+
+Free tiers have daily request limits. The client retries rate limits at most once (`LLM_RETRIES`) and never
+retries when the daily quota is exhausted, so a failed run doesn't burn the remaining quota.
 
 Each run measures **two different things** and saves them to `results/<date>_<model>.md`:
 
@@ -191,13 +196,13 @@ and an open test console: anyone could spend your quota.
 app/
   main.py              proxy endpoint, agent loop, dashboard API
   static/dashboard.html SOC dashboard (no external dependencies)
-  llm_client.py        mock (deliberately vulnerable) and OpenAI clients
+  llm_client.py        mock (deliberately vulnerable) and OpenAI-compatible API client
   tools.py             tools, honey tools, tool-call monitor
   storage.py           SQLite logging, JSONL alert export, tamper-evident audit chain
   compliance.py        rule -> OWASP / MITRE ATLAS / EU AI Act / BSI mapping + control matrix
   report.py            printable security assessment report
   ratelimit.py         per-IP rate limiting for the public demo
-  config.py            canary, honey tools, allowlist
+  config.py            settings: model/provider, demo mode, canary, honey tools, allowlist
   detectors/
     rules.py           direct injection rules
     canary.py          canary leak detection
